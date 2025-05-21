@@ -24,54 +24,50 @@ def get_embeddings(texts):
     return np.array([e["embedding"] for e in response.json()["data"]])
 
 
-def split_chunks(chunks, max_len=5000, min_len=500):
+def split_chunks(chunks, min_len=500, max_len=5000, overlap=500):
     new_chunks = []
+    part_num = 1
+    i = 0
 
-    for c in chunks:
-        text = c['text']
-        chunk_id = c['chunk_id']
-        link = c['wiki_url']
+    # Merge short chunks forward
+    while i < len(chunks):
+        text = chunks[i]['text'].replace('\n', ' ').strip()
+        chunk_id = str(chunks[i]['chunk_id'])
+        link = chunks[i]['wiki_url']
+        i += 1
 
-        if len(text) <= max_len:
-            
-            new_chunks.append({
-                'chunk_id': str(chunk_id),
-                'text': text,
-                'wiki_url': link
-            })
-            continue
+        # If text is too short, keep adding next chunks
+        while len(text) < min_len and i < len(chunks):
+            next_text = chunks[i]['text'].replace('\n', ' ').strip()
+            text += ' ' + next_text
+            i += 1
 
-        paragraphs = [p.strip() for p in text.split('\n\n') if len(p.strip()) >= min_len]
-
-        buffer = []
-        buffer_len = 0
-        part_num = 1
-
-        for para in paragraphs:
-            if buffer_len + len(para) + 2 <= max_len:
-                buffer.append(para)
-                buffer_len += len(para) + 2
-            else:
-                if buffer:
+        # If too long, split it into overlapping parts
+        if len(text) > max_len:
+            start = 0
+            while start < len(text):
+                end = start + max_len
+                chunk_text = text[start:end].strip()
+                if len(chunk_text) >= min_len:
                     new_chunks.append({
                         'chunk_id': f"{chunk_id}_{part_num}",
-                        'text': '\n\n'.join(buffer),
+                        'text': chunk_text,
                         'wiki_url': link
                     })
                     part_num += 1
-                buffer = [para]
-                buffer_len = len(para)
+                start += (max_len - overlap)
 
-        if buffer:
+        # If in acceptable range, save as-is
+        elif len(text) >= min_len:
             new_chunks.append({
                 'chunk_id': f"{chunk_id}_{part_num}",
-                'text': '\n\n'.join(buffer),
+                'text': text.strip(),
                 'wiki_url': link
             })
-
-        
+            part_num += 1
 
     return new_chunks
+
 
 
 
@@ -112,7 +108,7 @@ Answer:"""
             "http://127.0.0.1:1234/v1/completions",
             headers={"Content-Type": "application/json"},
             json={
-                "model": "gemma-2-9b-it", #"gemma-2-2b-it", # "gemma-2-9b-it", # "deepseek-r1-distill-qwen-7b",
+                "model": "gemma-2-2b-it",# "gemma-2-9b-it", #, # "gemma-2-9b-it", # "deepseek-r1-distill-qwen-7b",
                 "prompt": prompt,
                 "max_tokens": 1024,
                 "temperature": 0.7
@@ -132,6 +128,16 @@ def nl2br(s):
 
 app.secret_key = "1234567887654321"  # Needed for session
 app.config["SESSION_TYPE"] = "filesystem"
+
+reset_on_start = True  # global flag
+
+@app.before_request
+def clear_session_on_start():
+    global reset_on_start
+    if reset_on_start:
+        session.clear()
+        reset_on_start = False
+
 Session(app)
 
 HTML_TEMPLATE = """
@@ -273,6 +279,13 @@ if __name__ == "__main__":
     print("Loading wikivoyage data...")
     with open(json_path, 'r', encoding='utf-8') as f:
         chunks = json.load(f)
+
+    print("old chunks:")
+    texts = [c['text'] for c in chunks]
+    lengths = np.array([len(text) for text in texts])
+    print("min length: ", lengths.min())
+    print("max length: ", lengths.max())
+    print("mean length: ", lengths.mean())
     new_chunks = split_chunks(chunks, max_len=5000, min_len=500)
     print("extracting elements...")
     texts = [c['text'] for c in new_chunks]
@@ -280,7 +293,7 @@ if __name__ == "__main__":
     links = [c['wiki_url'] for c in new_chunks]
     id2text = dict(zip(ids, texts))
     id2link = dict(zip(ids, links))
-
+    print("new chunks:")
     lengths = np.array([len(text) for text in texts])
     print("min length: ", lengths.min())
     print("max length: ", lengths.max())
