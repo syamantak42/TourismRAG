@@ -17,3 +17,5 @@ This is a proof-of-concept (PoC) implementation of a **RAG-based travel and tour
 
 * **`faiss_Spain.index`**
   A prebuilt FAISS vector database created from the above JSON for efficient semantic search.
+
+To run and access the local LLM install LMStudio from https://lmstudio.ai/ and download and run your favourite LLM locally
